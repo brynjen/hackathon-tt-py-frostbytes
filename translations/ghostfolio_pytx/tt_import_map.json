@@ -1,0 +1,16 @@
+{
+  "big.js": null,
+  "date-fns": null,
+  "date-fns/utc": null,
+  "@date-fns/utc": null,
+  "@date-fns": null,
+  "lodash": null,
+  "@nestjs/common": null,
+  "@nestjs/bull": null,
+  "@nestjs": null,
+  "@prisma/client": null,
+  "@prisma": null,
+  "class-transformer": null,
+  "class-validator": null,
+  "@ghostfolio/": null
+}
