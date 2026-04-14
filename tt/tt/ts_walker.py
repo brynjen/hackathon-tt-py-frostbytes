@@ -38,17 +38,27 @@ class _Walker:
     # Module
     # ------------------------------------------------------------------
 
-    def visit_program(self, node) -> IRModule:
-        mod = IRModule()
-        for child in node.children:
+    def _collect_statements(self, children, skip_braces=False):
+        """Visit children and collect non-empty statement results."""
+        stmts: list[IRNode] = []
+        for child in children:
+            if skip_braces and child.type in ("{", "}"):
+                continue
             result = self._visit_statement(child)
             if result is not None and not isinstance(result, IREmpty):
                 if isinstance(result, list):
-                    mod.body.extend(result)
-                elif isinstance(result, IRImport):
-                    mod.imports.append(result)
+                    stmts.extend(result)
                 else:
-                    mod.body.append(result)
+                    stmts.append(result)
+        return stmts
+
+    def visit_program(self, node) -> IRModule:
+        mod = IRModule()
+        for item in self._collect_statements(node.children):
+            if isinstance(item, IRImport):
+                mod.imports.append(item)
+            else:
+                mod.body.append(item)
         return mod
 
     # ------------------------------------------------------------------
@@ -244,17 +254,7 @@ class _Walker:
         return self._visit_block(block)
 
     def _visit_block(self, node) -> list[IRNode]:
-        stmts: list[IRNode] = []
-        for child in node.children:
-            if child.type in ("{", "}"):
-                continue
-            result = self._visit_statement(child)
-            if result is not None and not isinstance(result, IREmpty):
-                if isinstance(result, list):
-                    stmts.extend(result)
-                else:
-                    stmts.append(result)
-        return stmts
+        return self._collect_statements(node.children, skip_braces=True)
 
     # ------------------------------------------------------------------
     # Statements

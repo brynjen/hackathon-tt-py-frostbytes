@@ -100,18 +100,14 @@ scoring:
 
 # Publish the last evaluation results (scoring + checks) to the leaderboard.
 # Requires TEAM_NAME to be set to something other than the default.
-# Loads repo-root .env in the shell so TEAM_NAME matches publish_scores.py behavior.
 publish_results:
-	@set -a; \
-	if [ -f .env ]; then . ./.env; fi; \
-	set +a; \
-	if [ -z "$$TEAM_NAME" ] || [ "$$TEAM_NAME" = "TeamAlpha" ]; then \
+	@if [ -z "$$TEAM_NAME" ] || [ "$$TEAM_NAME" = "TeamAlpha" ]; then \
 		echo "ERROR: TEAM_NAME is not set or is still the default 'TeamAlpha'."; \
 		echo "Set your team name with:"; \
 		echo "  export TEAM_NAME=YourTeamName"; \
 		echo "or add TEAM_NAME=YourTeamName to your .env file."; \
 		exit 1; \
-	fi; \
+	fi
 	uv run --project tt python evaluate/scoring/publish_scores.py --project ghostfolio
 
 # Run all implementation-rule detection scripts against tt/ source.

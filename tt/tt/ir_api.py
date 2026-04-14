@@ -166,9 +166,13 @@ def build_all_api_fns(ctx: dict) -> list[IRFunction]:
     """Return IR function nodes for all helper functions."""
     fns: list[IRFunction] = []
     fns.append(_fn_sd_helper())
+    fns.append(_fn_apply_pos())
+    fns.append(_fn_apply_neg())
     fns.append(_fn_positions(ctx))
     fns.append(_fn_accumulate(ctx))
+    fns.append(_fn_group_entries())
     fns.append(_fn_enrich())
+    fns.append(_fn_chart_row())
     fns.append(_fn_build_chart(ctx))
     fns.append(_fn_build_summary(ctx))
     fns.append(_fn_build_det())
@@ -267,92 +271,85 @@ def _fn_positions(ctx: dict) -> IRFunction:
                 ),
             ]),
             _assign(pos_var, _sub(result, sym)),
-            # Positive factor branch
             _if(_bin(typ, "==", pos), [
-                # Track gain from covering a short
-                _if(_bin(_sub(pos_var, _lit("quantity")), "<", _lit(0)), [
-                    _assign(_n("cov"), _call(_n("min"), n, _call(_n("abs"), _sub(pos_var, _lit("quantity"))))),
-                    _assign(
-                        _sub(pos_var, _k_rg()),
-                        _bin(
-                            _call(_attr(pos_var, "get"), _k_rg(), _lit(0.0)),
-                            "+",
-                            _bin(_n("cov"), "*", _bin(_sub(pos_var, _k_avg()), "-", p)),
-                        ),
-                    ),
-                ]),
-                _if(_bin(_sub(pos_var, _k_inv()), "<", _lit(0)), [
-                    _aug(_sub(pos_var, _k_inv()), "+=", _bin(n, "*", _sub(pos_var, _k_avg()))),
-                ], else_body=[
-                    _aug(_sub(pos_var, _k_inv()), "+=", _bin(n, "*", p)),
-                ]),
-                _aug(_sub(pos_var, _lit("quantity")), "+=", n),
-                _aug(_sub(pos_var, _k_charges_plural()), "+=", f),
-                # Track total capital deployed
-                _aug(_sub(pos_var, _k_twi()), "+=", _bin(n, "*", p)),
-                _assign(
-                    _sub(pos_var, _k_avg()),
-                    _tern(
-                        _bin(_sub(pos_var, _lit("quantity")), "!=", _lit(0)),
-                        _bin(
-                            _call(_n("abs"), _sub(pos_var, _k_inv())),
-                            "/",
-                            _call(_n("abs"), _sub(pos_var, _lit("quantity"))),
-                        ),
-                        _lit(0),
-                    ),
-                ),
+                _expr(_call(_n("_applyPos"), pos_var, n, p, f)),
             ], elif_clauses=[
-                # Negative factor branch
                 (_bin(typ, "==", neg), [
-                    _assign(avg, _sub(pos_var, _k_avg())),
-                    # Only track gain when closing a long (quantity > 0)
-                    _if(_bin(_sub(pos_var, _lit("quantity")), ">", _lit(0)), [
-                        _assign(_n("cov"), _call(_n("min"), n, _sub(pos_var, _lit("quantity")))),
-                        _assign(
-                            _sub(pos_var, _k_rg()),
-                            _bin(
-                                _call(_attr(pos_var, "get"), _k_rg(), _lit(0.0)),
-                                "+",
-                                _bin(_n("cov"), "*", _bin(p, "-", avg)),
-                            ),
-                        ),
-                    ]),
-                    _if(_bin(_sub(pos_var, _k_inv()), ">", _lit(0)), [
-                        _aug(_sub(pos_var, _k_inv()), "-=", _bin(n, "*", avg)),
-                    ], else_body=[
-                        _aug(_sub(pos_var, _k_inv()), "-=", _bin(n, "*", p)),
-                    ]),
-                    _aug(_sub(pos_var, _lit("quantity")), "-=", n),
-                    _aug(_sub(pos_var, _k_charges_plural()), "+=", f),
-                    # Mark if position went short
-                    _if(_bin(_sub(pos_var, _lit("quantity")), "<", _lit(0)), [
-                        _assign(_sub(pos_var, _lit("wasShort")), _lit(True)),
-                    ]),
-                    _if(_bin(_call(_n("abs"), _sub(pos_var, _lit("quantity"))), "<", _lit(1e-10)), [
-                        _assign(_sub(pos_var, _lit("quantity")), _lit(0.0)),
-                        _assign(_sub(pos_var, _k_inv()), _lit(0.0)),
-                    ]),
-                    _assign(
-                        _sub(pos_var, _k_avg()),
-                        _tern(
-                            _bin(_sub(pos_var, _lit("quantity")), "!=", _lit(0)),
-                            _bin(
-                                _call(_n("abs"), _sub(pos_var, _k_inv())),
-                                "/",
-                                _call(_n("abs"), _sub(pos_var, _lit("quantity"))),
-                            ),
-                            _lit(0),
-                        ),
-                    ),
+                    _expr(_call(_n("_applyNeg"), pos_var, n, p, f)),
                 ]),
-                # Payout branch
                 (_bin(typ, "==", div), [
                     _aug(_sub(pos_var, _lit("dividends")), "+=", _bin(n, "*", p)),
                 ]),
             ]),
         ]),
         _ret(result),
+    ])
+
+
+def _fn_apply_pos() -> IRFunction:
+    """Build _applyPos(pos, n, p, f) — applies a positive-factor activity."""
+    pv = _n("pos")
+    n, p, f = _n("n"), _n("p"), _n("f")
+    return IRFunction(name="_applyPos", params=[
+        IRParam("pos"), IRParam("n"), IRParam("p"), IRParam("f"),
+    ], body=[
+        _if(_bin(_sub(pv, _lit("quantity")), "<", _lit(0)), [
+            _assign(_n("cov"), _call(_n("min"), n, _call(_n("abs"), _sub(pv, _lit("quantity"))))),
+            _assign(_sub(pv, _k_rg()), _bin(
+                _call(_attr(pv, "get"), _k_rg(), _lit(0.0)), "+",
+                _bin(_n("cov"), "*", _bin(_sub(pv, _k_avg()), "-", p)),
+            )),
+        ]),
+        _if(_bin(_sub(pv, _k_inv()), "<", _lit(0)), [
+            _aug(_sub(pv, _k_inv()), "+=", _bin(n, "*", _sub(pv, _k_avg()))),
+        ], else_body=[
+            _aug(_sub(pv, _k_inv()), "+=", _bin(n, "*", p)),
+        ]),
+        _aug(_sub(pv, _lit("quantity")), "+=", n),
+        _aug(_sub(pv, _k_charges_plural()), "+=", f),
+        _aug(_sub(pv, _k_twi()), "+=", _bin(n, "*", p)),
+        _assign(_sub(pv, _k_avg()), _tern(
+            _bin(_sub(pv, _lit("quantity")), "!=", _lit(0)),
+            _bin(_call(_n("abs"), _sub(pv, _k_inv())), "/", _call(_n("abs"), _sub(pv, _lit("quantity")))),
+            _lit(0),
+        )),
+    ])
+
+
+def _fn_apply_neg() -> IRFunction:
+    """Build _applyNeg(pos, n, p, f) — applies a negative-factor activity."""
+    pv = _n("pos")
+    n, p, f = _n("n"), _n("p"), _n("f")
+    return IRFunction(name="_applyNeg", params=[
+        IRParam("pos"), IRParam("n"), IRParam("p"), IRParam("f"),
+    ], body=[
+        _assign(_n("avg"), _sub(pv, _k_avg())),
+        _if(_bin(_sub(pv, _lit("quantity")), ">", _lit(0)), [
+            _assign(_n("cov"), _call(_n("min"), n, _sub(pv, _lit("quantity")))),
+            _assign(_sub(pv, _k_rg()), _bin(
+                _call(_attr(pv, "get"), _k_rg(), _lit(0.0)), "+",
+                _bin(_n("cov"), "*", _bin(p, "-", _n("avg"))),
+            )),
+        ]),
+        _if(_bin(_sub(pv, _k_inv()), ">", _lit(0)), [
+            _aug(_sub(pv, _k_inv()), "-=", _bin(n, "*", _n("avg"))),
+        ], else_body=[
+            _aug(_sub(pv, _k_inv()), "-=", _bin(n, "*", p)),
+        ]),
+        _aug(_sub(pv, _lit("quantity")), "-=", n),
+        _aug(_sub(pv, _k_charges_plural()), "+=", f),
+        _if(_bin(_sub(pv, _lit("quantity")), "<", _lit(0)), [
+            _assign(_sub(pv, _lit("wasShort")), _lit(True)),
+        ]),
+        _if(_bin(_call(_n("abs"), _sub(pv, _lit("quantity"))), "<", _lit(1e-10)), [
+            _assign(_sub(pv, _lit("quantity")), _lit(0.0)),
+            _assign(_sub(pv, _k_inv()), _lit(0.0)),
+        ]),
+        _assign(_sub(pv, _k_avg()), _tern(
+            _bin(_sub(pv, _lit("quantity")), "!=", _lit(0)),
+            _bin(_call(_n("abs"), _sub(pv, _k_inv())), "/", _call(_n("abs"), _sub(pv, _lit("quantity")))),
+            _lit(0),
+        )),
     ])
 
 
@@ -395,6 +392,17 @@ def _fn_accumulate(ctx: dict) -> IRFunction:
             ]),
             clauses=[("d, v", _call(_n("sorted"), _call(_attr(_n("entries"), "items"))))],
         )),
+        _ret(_call(_n("_group_entries"), _n("result"), _n("grouping"))),
+    ])
+
+
+# ── _enrich (add market prices to positions) ────────────────────────
+
+def _fn_group_entries() -> IRFunction:
+    """Build _group_entries(result, grouping) — groups entries by period."""
+    return IRFunction(name="_group_entries", params=[
+        IRParam("result"), IRParam("grouping"),
+    ], body=[
         _if(_bin(_n("grouping"), "is", _lit(None)), [_ret(_n("result"))]),
         _assign(_n("grouped"), IRDict(keys=[], values=[])),
         _for("e", _n("result"), [
@@ -419,8 +427,6 @@ def _fn_accumulate(ctx: dict) -> IRFunction:
         )),
     ])
 
-
-# ── _enrich (add market prices to positions) ────────────────────────
 
 def _fn_enrich() -> IRFunction:
     return IRFunction(name="_enrich", params=[
@@ -516,43 +522,55 @@ def _fn_build_chart(ctx: dict) -> IRFunction:
             test=_bin(_n("d"), "<=", _n("end")),
             body=[
                 _assign(_n("dt"), _call(_attr(_n("d"), "isoformat"))),
-                _assign(_n("delta_inv"), _lit(0.0)),
-                _if(_bin(_n("dt"), "in", _n("sym_deltas")), [
-                    _for("s", _sub(_n("sym_deltas"), _n("dt")), [
-                        _expr(_call(_attr(_n("cum_q"), "setdefault"), _n("s"), _lit(0.0))),
-                        _aug(_sub(_n("cum_q"), _n("s")), "+=", _sub(_sub(_sub(_n("sym_deltas"), _n("dt")), _n("s")), _lit("dq"))),
-                        _aug(_n("delta_inv"), "+=", _sub(_sub(_sub(_n("sym_deltas"), _n("dt")), _n("s")), _lit("di"))),
-                    ]),
-                ]),
-                _aug(_n("cum_inv"), "+=", _n("delta_inv")),
-                # Compute market value from cumulative quantities
-                _assign(_n("mv"), _lit(0.0)),
-                _for("s", _call(_n("list"), _call(_attr(_n("cum_q"), "keys"))), [
-                    _assign(_n("q"), _sub(_n("cum_q"), _n("s"))),
-                    _if(_bin(_n("q"), "==", _lit(0)), [IRContinue()]),
-                    _assign(_n("hp"), _call(_attr(_n("svc"), "get_nearest_price"), _n("s"), _n("dt"))),
-                    _aug(_n("mv"), "+=", _bin(_n("q"), "*", _n("hp"))),
-                ]),
-                _assign(_n("net_p"), _bin(
-                    _bin(_bin(_n("mv"), "-", _n("cum_inv")), "-", _n("total_f")),
-                    "+",
-                    _n("rg"),
+                _assign(_n("row"), _call(_n("_chart_row"),
+                    _n("dt"), _n("sym_deltas"), _n("cum_q"), _n("cum_inv"),
+                    _n("svc"), _n("total_f"), _n("rg"),
                 )),
-                _assign(_n("npi"), _tern(_n("cum_inv"), _bin(_n("net_p"), "/", _n("cum_inv")), _lit(0.0))),
-                _expr(_call(_attr(_n("result"), "append"), _dict([
-                    (_lit("date"), _n("dt")),
-                    (_bin(_bin(_lit("invest"), "+", _lit("mentValue")), "+", _lit("WithCurrencyEffect")), _n("delta_inv")),
-                    (_k_np(), _n("net_p")),
-                    (_bin(_bin(_lit("net"), "+", _lit("Perf")), "+", _lit("ormanceInPercentage")), _n("npi")),
-                    (_bin(_bin(_lit("net"), "+", _lit("Perf")), "+", _lit("ormanceInPercentageWithCurrencyEffect")), _n("npi")),
-                    (_lit("netWorth"), _n("mv")),
-                    (_bin(_bin(_lit("total"), "+", _lit("Inv")), "+", _lit("estment")), _n("cum_inv")),
-                    (_lit("value"), _n("mv")),
-                ]))),
+                _expr(_call(_attr(_n("result"), "append"), _sub(_n("row"), _lit(0)))),
+                _assign(_n("cum_inv"), _sub(_n("row"), _lit(1))),
                 _aug(_n("d"), "+=", _call(_n("_TD"), days=_lit(1))),
             ],
         ),
         _ret(_n("result")),
+    ])
+
+
+def _fn_chart_row() -> IRFunction:
+    """Build _chart_row — computes one row of chart data."""
+    return IRFunction(name="_chartRow", params=[
+        IRParam("dt"), IRParam("sd"), IRParam("cq"), IRParam("ci"),
+        IRParam("svc"), IRParam("tf"), IRParam("rg"),
+    ], body=[
+        _assign(_n("di"), _lit(0.0)),
+        _if(_bin(_n("dt"), "in", _n("sd")), [
+            _for("s", _sub(_n("sd"), _n("dt")), [
+                _expr(_call(_attr(_n("cq"), "setdefault"), _n("s"), _lit(0.0))),
+                _aug(_sub(_n("cq"), _n("s")), "+=", _sub(_sub(_sub(_n("sd"), _n("dt")), _n("s")), _lit("dq"))),
+                _aug(_n("di"), "+=", _sub(_sub(_sub(_n("sd"), _n("dt")), _n("s")), _lit("di"))),
+            ]),
+        ]),
+        _aug(_n("ci"), "+=", _n("di")),
+        _assign(_n("mv"), _lit(0.0)),
+        _for("s", _call(_n("list"), _call(_attr(_n("cq"), "keys"))), [
+            _assign(_n("q"), _sub(_n("cq"), _n("s"))),
+            _if(_bin(_n("q"), "==", _lit(0)), [IRContinue()]),
+            _aug(_n("mv"), "+=", _bin(_n("q"), "*", _call(_attr(_n("svc"), "get_nearest_price"), _n("s"), _n("dt")))),
+        ]),
+        _assign(_n("np"), _bin(_bin(_bin(_n("mv"), "-", _n("ci")), "-", _n("tf")), "+", _n("rg"))),
+        _assign(_n("npi"), _tern(_n("ci"), _bin(_n("np"), "/", _n("ci")), _lit(0.0))),
+        _ret(IRList(elements=[
+            _dict([
+                (_lit("date"), _n("dt")),
+                (_bin(_bin(_lit("invest"), "+", _lit("mentValue")), "+", _lit("WithCurrencyEffect")), _n("di")),
+                (_k_np(), _n("np")),
+                (_bin(_bin(_lit("net"), "+", _lit("Perf")), "+", _lit("ormanceInPercentage")), _n("npi")),
+                (_bin(_bin(_lit("net"), "+", _lit("Perf")), "+", _lit("ormanceInPercentageWithCurrencyEffect")), _n("npi")),
+                (_lit("netWorth"), _n("mv")),
+                (_bin(_bin(_lit("total"), "+", _lit("Inv")), "+", _lit("estment")), _n("ci")),
+                (_lit("value"), _n("mv")),
+            ]),
+            _n("ci"),
+        ])),
     ])
 
 
@@ -704,28 +722,7 @@ def _fn_extract_by_type() -> IRFunction:
             ]),
             clauses=[("d, v", _call(_n("sorted"), _call(_attr(_n("entries"), "items"))))],
         )),
-        _if(_bin(_n("grouping"), "is", _lit(None)), [_ret(_n("result"))]),
-        _assign(_n("grouped"), IRDict(keys=[], values=[])),
-        _for("e", _n("result"), [
-            _assign(_n("d"), _sub(_n("e"), _lit("date"))),
-            _assign(_n("v"), _sub(_n("e"), _k_inv())),
-            _if(_bin(_n("grouping"), "==", _lit("month")), [
-                _assign(_n("gk"), _bin(_slice(_n("d"), end=_lit(7)), "+", _lit("-01"))),
-            ], else_body=[
-                _assign(_n("gk"), _bin(_slice(_n("d"), end=_lit(4)), "+", _lit("-01-01"))),
-            ]),
-            _if(_bin(_n("gk"), "not in", _n("grouped")), [
-                _assign(_sub(_n("grouped"), _n("gk")), _lit(0.0)),
-            ]),
-            _aug(_sub(_n("grouped"), _n("gk")), "+=", _n("v")),
-        ]),
-        _ret(IRListComp(
-            expr=_dict([
-                (_lit("date"), _n("k")),
-                (_k_inv(), _n("v")),
-            ]),
-            clauses=[("k, v", _call(_n("sorted"), _call(_attr(_n("grouped"), "items"))))],
-        )),
+        _ret(_call(_n("_group_entries"), _n("result"), _n("grouping"))),
     ])
 
 

@@ -36,32 +36,31 @@ def transform_big_js(module: IRModule) -> IRModule:
     return module
 
 
+def _iter_ir_children(node) -> list:
+    """Yield all IRNode children from a dataclass node."""
+    if not hasattr(node, "__dataclass_fields__"):
+        return []
+    result = []
+    for f in node.__dataclass_fields__:
+        val = getattr(node, f)
+        if isinstance(val, IRNode):
+            result.append(val)
+        elif isinstance(val, list):
+            for item in val:
+                if isinstance(item, IRNode):
+                    result.append(item)
+                elif isinstance(item, (tuple, list)):
+                    result.extend(x for x in item if isinstance(x, IRNode))
+    return result
+
+
 def _scan_for_big(node) -> bool:
     """Check if any New(Big) or Big references exist."""
     if isinstance(node, IRNew) and isinstance(node.cls, IRName) and node.cls.name == "Big":
         return True
     if isinstance(node, IRName) and node.name == "Big":
         return True
-    for attr_name in ("__dict__",):
-        pass
-    if hasattr(node, "__dataclass_fields__"):
-        for field_name in node.__dataclass_fields__:
-            val = getattr(node, field_name)
-            if isinstance(val, IRNode) and _scan_for_big(val):
-                return True
-            if isinstance(val, list):
-                for item in val:
-                    if isinstance(item, IRNode) and _scan_for_big(item):
-                        return True
-                    if isinstance(item, tuple):
-                        for t in item:
-                            if isinstance(t, IRNode) and _scan_for_big(t):
-                                return True
-                            if isinstance(t, list):
-                                for li in t:
-                                    if isinstance(li, IRNode) and _scan_for_big(li):
-                                        return True
-    return False
+    return any(_scan_for_big(c) for c in _iter_ir_children(node))
 
 
 def _visit(node: IRNode) -> IRNode:

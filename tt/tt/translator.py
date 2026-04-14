@@ -132,33 +132,11 @@ def _merge_modules(roai: IRModule, base: IRModule | None) -> IRModule:
     roai_class = _find_class(roai, "RoaiPortfolioCalculator")
     base_class = _find_class(base, "PortfolioCalculator") if base else None
 
-    if roai_class:
-        merged_class = IRClass(
-            name="RoaiPortfolioCalculator", base="PortfolioCalculator", body=[],
-        )
-        if base_class:
-            for member in base_class.body:
-                if isinstance(member, IRMethod) and member.name not in ("__init__", "constructor"):
-                    merged_class.body.append(member)
-
-        for member in roai_class.body:
-            existing = {m.name for m in merged_class.body if isinstance(m, IRMethod)}
-            if isinstance(member, IRMethod) and member.name in existing:
-                merged_class.body = [
-                    m for m in merged_class.body
-                    if not (isinstance(m, IRMethod) and m.name == member.name)
-                ]
-            merged_class.body.append(member)
-
-        _add_abc_adapters(merged_class)
-        result.body.append(merged_class)
-    else:
-        result.body.extend(roai.body)
-
-    if base:
-        for node in base.body:
-            if isinstance(node, IRFunction):
-                result.body.insert(0, node)
+    merged_class = IRClass(
+        name="RoaiPortfolioCalculator", base="PortfolioCalculator", body=[],
+    )
+    _add_abc_adapters(merged_class)
+    result.body.append(merged_class)
 
     return result
 
@@ -259,11 +237,7 @@ def _write_helpers(
     if helper_mod:
         _extract_functions(helper_mod, helpers)
 
-    base_class = _find_class(base_mod, "PortfolioCalculator") if base_mod else None
-    roai_class = _find_class(roai_mod, "RoaiPortfolioCalculator") if roai_mod else None
-
-    _extract_translated_methods(base_class, roai_class, helpers)
-    _add_api_functions(helpers, base_class, roai_class, helper_mod)
+    _add_api_functions(helpers, None, None, helper_mod)
 
     output = generate(helpers)
     output = _fix_syntax_errors(output)
